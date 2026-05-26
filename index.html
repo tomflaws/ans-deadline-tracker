@@ -242,6 +242,35 @@
 .sol-chip.ok{background:#f0fdf4;color:#14532d}
 .sol-chip.minor{background:#fdf4ff;color:#6b21a8}
 @media(max-width:768px){.case-detail-grid{grid-template-columns:1fr}.case-detail-sidebar{position:static}}
+
+/* MEDICAL SECTION */
+.med-section{margin-bottom:16px}
+.med-section-title{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gray);margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.med-row{display:grid;gap:6px;padding:10px 0;border-bottom:1px solid var(--border)}
+.med-row:last-child{border-bottom:none}
+.med-row-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.med-provider{font-size:13px;font-weight:700;color:var(--navy);flex:1}
+.med-status{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap}
+.med-status.pending{background:#fff7ed;color:#92400e;border:1px solid #fcd34d}
+.med-status.requested{background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd}
+.med-status.received{background:#dcfce7;color:#14532d;border:1px solid #86efac}
+.med-status.complete{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
+.med-status.overdue{background:#fee2e2;color:#7f1d1d;border:1px solid #fca5a5}
+.med-meta{font-size:11px;color:var(--gray);display:flex;gap:12px;flex-wrap:wrap}
+.med-amount{font-size:12px;font-weight:600;color:var(--text)}
+.med-actions{display:flex;gap:4px;margin-top:4px}
+.med-btn{padding:3px 8px;border-radius:5px;border:1px solid var(--border);background:white;cursor:pointer;font-size:10px;font-weight:600;color:var(--gray)}
+.med-btn:hover{background:var(--bg);color:var(--navy)}
+.med-btn.primary{background:var(--navy);color:white;border-color:var(--navy)}
+.med-btn.danger{background:#fff5f5;color:var(--red);border-color:#fecaca}
+.med-overdue-banner{background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;margin-bottom:12px}
+.med-overdue-banner-title{font-size:12px;font-weight:800;color:#7f1d1d;margin-bottom:6px}
+.med-overdue-item{font-size:11px;color:#7f1d1d;margin-bottom:3px}
+.med-summary{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.med-summary-item{text-align:center}
+.med-summary-num{font-size:18px;font-weight:900;color:var(--navy)}
+.med-summary-label{font-size:10px;color:var(--gray);font-weight:600;text-transform:uppercase;margin-top:2px}
+.med-records-badge{background:#fff7ed;color:#92400e;border:1px solid #fcd34d;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px}
 </style>
 </head>
 <body>
@@ -1042,9 +1071,11 @@ function renderCases(){
     const urgent=caseDeadlines.filter(d=>{const x=daysUntil(d.date);return x>=0&&x<=7;}).length;
     const soon=caseDeadlines.filter(d=>{const x=daysUntil(d.date);return x>7&&x<=21;}).length;
     const deadlineBadge=urgent?`<span style="background:#fee2e2;color:#7f1d1d;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px">&#x2691; ${urgent} urgent</span>`:soon?`<span style="background:#fff7ed;color:#92400e;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px">${soon} soon</span>`:'';
+    const overdueRecs=getOverdueRecords(c.name);
+    const recBadge=overdueRecs.length?`<span class="med-records-badge">&#x1F4CB; ${overdueRecs.length} records overdue</span>`:'';
     return `<tr class="${c.status==='resolved'?'resolved':''}" style="cursor:pointer" onclick="openCase('${esc(c.name)}')">
       <td style="max-width:300px">
-        <div style="font-weight:700;color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.name)}">${esc(c.name)}${deadlineBadge}</div>
+        <div style="font-weight:700;color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.name)}">${esc(c.name)}${deadlineBadge}${recBadge}</div>
         <div style="font-size:11px;color:var(--gray);margin-top:2px">${esc(c.phase)}${c.court?' &mdash; '+esc(c.court):''}</div>
       </td>
       <td><span class="phase-badge ${pClass}">${c.inSuit?'In Suit':c.status==='resolved'?'Resolved':'Pre-Suit'}</span></td>
@@ -1802,6 +1833,9 @@ function renderCaseDetail(caseName){
     }).join('');
   }
 
+  // Load medical section asynchronously
+  renderMedicalSection(caseName);
+
   // Defendants
   const defs = getDefendants(caseName);
   if(!defs.length){
@@ -2026,6 +2060,447 @@ function saveRule9aDeadlines(){
   document.getElementById('rule9a-modal').classList.add('hidden');
   renderView();updateStats();refreshDetailIfOpen();
   notify('Rule 9A deadlines added for '+motion,true);
+}
+
+// ── MEDICAL TRACKING ──────────────────────────────────────────────────────
+const SB_MED_HEADERS={...SB_HEADERS};
+
+// Local cache for medical data
+let medicalData={}; // {caseName: {records:[], bills:[], liens:[]}}
+
+function getMedical(caseName){
+  return medicalData[caseName]||{records:[],bills:[],liens:[]};
+}
+
+async function loadMedical(caseName){
+  try{
+    const rows=await sbGet('medical','select=*&case_name=eq.'+encodeURIComponent(caseName));
+    if(rows){
+      const data={records:[],bills:[],liens:[]};
+      rows.forEach(r=>{
+        if(r.category==='record') data.records.push(r);
+        else if(r.category==='bill') data.bills.push(r);
+        else if(r.category==='lien') data.liens.push(r);
+      });
+      medicalData[caseName]=data;
+    }
+  }catch(e){console.error('loadMedical error:',e);}
+  return getMedical(caseName);
+}
+
+async function saveMedicalRow(row){
+  try{
+    await sbUpsert('medical',[row]);
+    // Update local cache
+    const data=getMedical(row.case_name);
+    const cat=row.category+'s';
+    const idx=data[cat].findIndex(r=>r.id===row.id);
+    if(idx>=0) data[cat][idx]=row;
+    else data[cat].push(row);
+    medicalData[row.case_name]=data;
+  }catch(e){console.error('saveMedicalRow error:',e);}
+}
+
+async function deleteMedicalRow(id, caseName, category){
+  try{
+    await sbDelete('medical','id',id);
+    const data=getMedical(caseName);
+    const cat=category+'s';
+    data[cat]=data[cat].filter(r=>r.id!==id);
+    medicalData[caseName]=data;
+  }catch(e){console.error('deleteMedicalRow error:',e);}
+}
+
+function fmtMoney(n){
+  if(!n&&n!==0)return'—';
+  return'$'+parseFloat(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function isRecordOverdue(rec){
+  if(rec.status==='received'||rec.status==='complete') return false;
+  if(!rec.target_date) return false;
+  return daysUntil(rec.target_date)<0;
+}
+
+function getOverdueRecords(caseName){
+  const data=getMedical(caseName);
+  return data.records.filter(isRecordOverdue);
+}
+
+// ── RECORDS ───────────────────────────────────────────────────────────────
+function openMedRecordsModal(caseName, editId){
+  document.getElementById('med-records-case').value=caseName;
+  document.getElementById('med-records-edit-id').value=editId||'';
+  document.getElementById('med-records-modal-title').textContent=editId?'Edit Records Request':'Add Records Request';
+  if(editId){
+    const data=getMedical(caseName);
+    const rec=data.records.find(r=>r.id===editId);
+    if(rec){
+      document.getElementById('med-rec-provider').value=rec.provider||'';
+      document.getElementById('med-rec-requested').value=rec.date_requested||'';
+      document.getElementById('med-rec-target').value=rec.target_date||'';
+      document.getElementById('med-rec-received').value=rec.date_received||'';
+      document.getElementById('med-rec-status').value=rec.status||'pending';
+      document.getElementById('med-rec-notes').value=rec.notes||'';
+    }
+  } else {
+    ['med-rec-provider','med-rec-requested','med-rec-target','med-rec-received','med-rec-notes'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('med-rec-status').value='pending';
+  }
+  document.getElementById('med-records-modal').classList.remove('hidden');
+}
+
+async function saveMedRecord(){
+  const caseName=document.getElementById('med-records-case').value;
+  const editId=document.getElementById('med-records-edit-id').value;
+  const provider=document.getElementById('med-rec-provider').value.trim();
+  if(!provider){alert('Please enter a provider name.');return;}
+  const row={
+    id:editId||uid(),
+    case_name:caseName,
+    category:'record',
+    provider,
+    date_requested:document.getElementById('med-rec-requested').value||null,
+    target_date:document.getElementById('med-rec-target').value||null,
+    date_received:document.getElementById('med-rec-received').value||null,
+    status:document.getElementById('med-rec-status').value,
+    notes:document.getElementById('med-rec-notes').value.trim()||null,
+    dates_of_treatment:null,amount_billed:null,amount_adjusted:null,
+    lien_holder:null,lien_type:null,lien_amount:null,lien_negotiated:null
+  };
+  await saveMedicalRow(row);
+  document.getElementById('med-records-modal').classList.add('hidden');
+  refreshDetailIfOpen();
+  notify('Records request saved',true);
+}
+
+// ── BILLS ─────────────────────────────────────────────────────────────────
+function openMedBillModal(caseName, editId){
+  document.getElementById('med-bill-case').value=caseName;
+  document.getElementById('med-bill-edit-id').value=editId||'';
+  document.getElementById('med-bill-modal-title').textContent=editId?'Edit Medical Bill':'Add Medical Bill';
+  if(editId){
+    const data=getMedical(caseName);
+    const bill=data.bills.find(r=>r.id===editId);
+    if(bill){
+      document.getElementById('med-bill-provider').value=bill.provider||'';
+      document.getElementById('med-bill-dates').value=bill.dates_of_treatment||'';
+      document.getElementById('med-bill-billed').value=bill.amount_billed||'';
+      document.getElementById('med-bill-adjusted').value=bill.amount_adjusted||'';
+      document.getElementById('med-bill-notes').value=bill.notes||'';
+    }
+  } else {
+    ['med-bill-provider','med-bill-dates','med-bill-billed','med-bill-adjusted','med-bill-notes'].forEach(id=>document.getElementById(id).value='');
+  }
+  document.getElementById('med-bill-modal').classList.remove('hidden');
+}
+
+async function saveMedBill(){
+  const caseName=document.getElementById('med-bill-case').value;
+  const editId=document.getElementById('med-bill-edit-id').value;
+  const provider=document.getElementById('med-bill-provider').value.trim();
+  if(!provider){alert('Please enter a provider name.');return;}
+  const row={
+    id:editId||uid(),
+    case_name:caseName,
+    category:'bill',
+    provider,
+    dates_of_treatment:document.getElementById('med-bill-dates').value.trim()||null,
+    amount_billed:parseFloat(document.getElementById('med-bill-billed').value)||null,
+    amount_adjusted:parseFloat(document.getElementById('med-bill-adjusted').value)||null,
+    notes:document.getElementById('med-bill-notes').value.trim()||null,
+    date_requested:null,target_date:null,date_received:null,status:'complete',
+    lien_holder:null,lien_type:null,lien_amount:null,lien_negotiated:null
+  };
+  await saveMedicalRow(row);
+  document.getElementById('med-bill-modal').classList.add('hidden');
+  refreshDetailIfOpen();
+  notify('Bill saved',true);
+}
+
+// ── LIENS ─────────────────────────────────────────────────────────────────
+function openMedLienModal(caseName, editId){
+  document.getElementById('med-lien-case').value=caseName;
+  document.getElementById('med-lien-edit-id').value=editId||'';
+  document.getElementById('med-lien-modal-title').textContent=editId?'Edit Lien':'Add Lien';
+  if(editId){
+    const data=getMedical(caseName);
+    const lien=data.liens.find(r=>r.id===editId);
+    if(lien){
+      document.getElementById('med-lien-holder').value=lien.lien_holder||'';
+      document.getElementById('med-lien-type').value=lien.lien_type||'Medicare';
+      document.getElementById('med-lien-amount').value=lien.lien_amount||'';
+      document.getElementById('med-lien-negotiated').value=lien.lien_negotiated||'';
+      document.getElementById('med-lien-status').value=lien.status||'Outstanding';
+      document.getElementById('med-lien-notes').value=lien.notes||'';
+    }
+  } else {
+    ['med-lien-holder','med-lien-amount','med-lien-negotiated','med-lien-notes'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('med-lien-type').value='Medicare';
+    document.getElementById('med-lien-status').value='Outstanding';
+  }
+  document.getElementById('med-lien-modal').classList.remove('hidden');
+}
+
+async function saveMedLien(){
+  const caseName=document.getElementById('med-lien-case').value;
+  const editId=document.getElementById('med-lien-edit-id').value;
+  const holder=document.getElementById('med-lien-holder').value.trim();
+  if(!holder){alert('Please enter a lienholder name.');return;}
+  const row={
+    id:editId||uid(),
+    case_name:caseName,
+    category:'lien',
+    provider:holder,
+    lien_holder:holder,
+    lien_type:document.getElementById('med-lien-type').value,
+    lien_amount:parseFloat(document.getElementById('med-lien-amount').value)||null,
+    lien_negotiated:parseFloat(document.getElementById('med-lien-negotiated').value)||null,
+    status:document.getElementById('med-lien-status').value,
+    notes:document.getElementById('med-lien-notes').value.trim()||null,
+    date_requested:null,target_date:null,date_received:null,
+    dates_of_treatment:null,amount_billed:null,amount_adjusted:null
+  };
+  await saveMedicalRow(row);
+  document.getElementById('med-lien-modal').classList.add('hidden');
+  refreshDetailIfOpen();
+  notify('Lien saved',true);
+}
+
+async function deleteMedItem(id, caseName, category){
+  if(!confirm('Delete this item?'))return;
+  await deleteMedicalRow(id, caseName, category);
+  refreshDetailIfOpen();
+  notify('Deleted');
+}
+
+// ── WORD EXPORT ───────────────────────────────────────────────────────────
+function exportMedicalToWord(caseName){
+  const data=getMedical(caseName);
+  const today=new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  
+  // Calculate totals
+  const totalBilled=data.bills.reduce((s,b)=>s+(parseFloat(b.amount_billed)||0),0);
+  const totalAdjusted=data.bills.reduce((s,b)=>s+(parseFloat(b.amount_adjusted)||0),0);
+  const totalBalance=totalBilled-totalAdjusted;
+  const totalLiens=data.liens.reduce((s,l)=>s+(parseFloat(l.lien_amount)||0),0);
+
+  let html=`<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset='utf-8'><title>Medical Summary - ${esc(caseName)}</title>
+<style>
+  body{font-family:'Times New Roman',serif;font-size:12pt;margin:1in}
+  h1{font-size:14pt;text-align:center;font-weight:bold;margin-bottom:6pt}
+  h2{font-size:12pt;font-weight:bold;margin-top:18pt;margin-bottom:6pt;border-bottom:1pt solid black;padding-bottom:3pt}
+  p{margin:3pt 0}
+  table{width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:11pt}
+  th{background:#f0f0f0;border:1pt solid black;padding:5pt 8pt;text-align:left;font-weight:bold}
+  td{border:1pt solid black;padding:5pt 8pt;vertical-align:top}
+  .right{text-align:right}
+  .total-row td{font-weight:bold;background:#f8f8f8}
+  .center{text-align:center}
+</style></head><body>
+<h1>MEDICAL BILLS AND RECORDS SUMMARY</h1>
+<p class='center'><strong>Client/Case:</strong> ${esc(caseName)}</p>
+<p class='center'><strong>Date Prepared:</strong> ${today}</p>
+<p class='center'><strong>Prepared by:</strong> Altman Nussbaum Shunnarah</p>`;
+
+  // Bills table
+  if(data.bills.length>0){
+    html+=`<h2>Medical Bills</h2>
+<table>
+<tr><th>Provider</th><th>Dates of Treatment</th><th class='right'>Amount Billed</th><th class='right'>Amount Adjusted</th><th class='right'>Balance</th></tr>`;
+    data.bills.forEach(b=>{
+      const bal=(parseFloat(b.amount_billed)||0)-(parseFloat(b.amount_adjusted)||0);
+      html+=`<tr>
+        <td>${esc(b.provider)}</td>
+        <td>${esc(b.dates_of_treatment||'—')}</td>
+        <td class='right'>${fmtMoney(b.amount_billed)}</td>
+        <td class='right'>${fmtMoney(b.amount_adjusted)}</td>
+        <td class='right'>${fmtMoney(bal)}</td>
+      </tr>`;
+    });
+    html+=`<tr class='total-row'>
+      <td colspan='2'><strong>TOTALS</strong></td>
+      <td class='right'><strong>${fmtMoney(totalBilled)}</strong></td>
+      <td class='right'><strong>${fmtMoney(totalAdjusted)}</strong></td>
+      <td class='right'><strong>${fmtMoney(totalBalance)}</strong></td>
+    </tr></table>`;
+  }
+
+  // Liens table
+  if(data.liens.length>0){
+    html+=`<h2>Liens</h2>
+<table>
+<tr><th>Lienholder</th><th>Type</th><th class='right'>Claimed Amount</th><th class='right'>Negotiated Amount</th><th>Status</th></tr>`;
+    data.liens.forEach(l=>{
+      html+=`<tr>
+        <td>${esc(l.lien_holder||l.provider)}</td>
+        <td>${esc(l.lien_type||'—')}</td>
+        <td class='right'>${fmtMoney(l.lien_amount)}</td>
+        <td class='right'>${fmtMoney(l.lien_negotiated)}</td>
+        <td>${esc(l.status||'—')}</td>
+      </tr>`;
+    });
+    html+=`<tr class='total-row'><td colspan='2'><strong>TOTAL LIENS</strong></td>
+      <td class='right'><strong>${fmtMoney(totalLiens)}</strong></td>
+      <td colspan='2'></td>
+    </tr></table>`;
+  }
+
+  // Records table
+  if(data.records.length>0){
+    html+=`<h2>Medical Records Requests</h2>
+<table>
+<tr><th>Provider</th><th>Date Requested</th><th>Date Received</th><th>Status</th><th>Notes</th></tr>`;
+    data.records.forEach(r=>{
+      html+=`<tr>
+        <td>${esc(r.provider)}</td>
+        <td>${r.date_requested||'—'}</td>
+        <td>${r.date_received||'—'}</td>
+        <td>${esc(r.status||'—')}</td>
+        <td>${esc(r.notes||'—')}</td>
+      </tr>`;
+    });
+    html+=`</table>`;
+  }
+
+  html+=`</body></html>`;
+
+  const blob=new Blob([html],{type:'application/msword'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=caseName.replace(/[^a-zA-Z0-9\s]/g,'').replace(/\s+/g,'_').slice(0,40)+'_Medical_Summary.doc';
+  a.click();
+  URL.revokeObjectURL(url);
+  notify('Medical summary exported',true);
+}
+
+// ── RENDER MEDICAL SECTION IN CASE DETAIL ─────────────────────────────────
+async function renderMedicalSection(caseName){
+  const el=document.getElementById('cd-medical');
+  if(!el)return;
+  el.innerHTML='<div style="font-size:12px;color:var(--gray);text-align:center;padding:12px">Loading...</div>';
+  const data=await loadMedical(caseName);
+  
+  const overdue=data.records.filter(isRecordOverdue);
+  let html='';
+
+  // Overdue banner
+  if(overdue.length>0){
+    html+=`<div class="med-overdue-banner">
+      <div class="med-overdue-banner-title">&#x26A0; ${overdue.length} Overdue Record${overdue.length!==1?'s':''}</div>
+      ${overdue.map(r=>`<div class="med-overdue-item">&#x25CF; ${esc(r.provider)} — target: ${r.target_date} (${Math.abs(daysUntil(r.target_date))}d overdue)
+        <button class="med-btn primary" onclick="openMedRecordsModal('${esc(caseName)}','${r.id}')" style="margin-left:8px">Follow Up</button>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  // Records section
+  html+=`<div class="med-section">
+    <div class="med-section-title">Records Requests
+      <button class="med-btn primary" onclick="openMedRecordsModal('${esc(caseName)}')">+ Add</button>
+    </div>`;
+  if(!data.records.length){
+    html+='<div style="font-size:12px;color:var(--gray);padding:8px 0">No records requests yet.</div>';
+  } else {
+    data.records.forEach(r=>{
+      const od=isRecordOverdue(r);
+      const statusClass=od?'overdue':r.status;
+      const statusLabel=od?'OVERDUE':r.status;
+      html+=`<div class="med-row">
+        <div class="med-row-top">
+          <div class="med-provider">${esc(r.provider)}</div>
+          <span class="med-status ${statusClass}">${statusLabel.toUpperCase()}</span>
+        </div>
+        <div class="med-meta">
+          ${r.date_requested?'<span>Requested: '+r.date_requested+'</span>':''}
+          ${r.target_date?'<span>Target: '+r.target_date+'</span>':''}
+          ${r.date_received?'<span>Received: '+r.date_received+'</span>':''}
+        </div>
+        ${r.notes?`<div style="font-size:11px;color:var(--gray);font-style:italic">${esc(r.notes)}</div>`:''}
+        <div class="med-actions">
+          <button class="med-btn" onclick="openMedRecordsModal('${esc(caseName)}','${r.id}')">&#x270F; Edit</button>
+          <button class="med-btn danger" onclick="deleteMedItem('${r.id}','${esc(caseName)}','record')">&#x1F5D1;</button>
+        </div>
+      </div>`;
+    });
+  }
+  html+='</div>';
+
+  // Bills section
+  const totalBilled=data.bills.reduce((s,b)=>s+(parseFloat(b.amount_billed)||0),0);
+  const totalAdjusted=data.bills.reduce((s,b)=>s+(parseFloat(b.amount_adjusted)||0),0);
+  html+=`<div class="med-section">
+    <div class="med-section-title">Medical Bills
+      <button class="med-btn primary" onclick="openMedBillModal('${esc(caseName)}')">+ Add</button>
+    </div>`;
+  if(!data.bills.length){
+    html+='<div style="font-size:12px;color:var(--gray);padding:8px 0">No bills entered yet.</div>';
+  } else {
+    data.bills.forEach(b=>{
+      const bal=(parseFloat(b.amount_billed)||0)-(parseFloat(b.amount_adjusted)||0);
+      html+=`<div class="med-row">
+        <div class="med-row-top">
+          <div class="med-provider">${esc(b.provider)}</div>
+          <div class="med-amount">${fmtMoney(bal)} balance</div>
+        </div>
+        ${b.dates_of_treatment?`<div class="med-meta"><span>Treatment: ${esc(b.dates_of_treatment)}</span></div>`:''}
+        <div class="med-meta">
+          <span>Billed: ${fmtMoney(b.amount_billed)}</span>
+          <span>Adjusted: ${fmtMoney(b.amount_adjusted)}</span>
+        </div>
+        ${b.notes?`<div style="font-size:11px;color:var(--gray);font-style:italic">${esc(b.notes)}</div>`:''}
+        <div class="med-actions">
+          <button class="med-btn" onclick="openMedBillModal('${esc(caseName)}','${b.id}')">&#x270F; Edit</button>
+          <button class="med-btn danger" onclick="deleteMedItem('${b.id}','${esc(caseName)}','bill')">&#x1F5D1;</button>
+        </div>
+      </div>`;
+    });
+    html+=`<div style="font-size:12px;font-weight:700;color:var(--navy);padding:8px 0;text-align:right">
+      Total Billed: ${fmtMoney(totalBilled)} &nbsp;|&nbsp; Total Adjusted: ${fmtMoney(totalAdjusted)} &nbsp;|&nbsp; Balance: ${fmtMoney(totalBilled-totalAdjusted)}
+    </div>`;
+  }
+  html+='</div>';
+
+  // Liens section
+  const totalLiens=data.liens.reduce((s,l)=>s+(parseFloat(l.lien_amount)||0),0);
+  html+=`<div class="med-section">
+    <div class="med-section-title">Liens
+      <button class="med-btn primary" onclick="openMedLienModal('${esc(caseName)}')">+ Add</button>
+    </div>`;
+  if(!data.liens.length){
+    html+='<div style="font-size:12px;color:var(--gray);padding:8px 0">No liens entered yet.</div>';
+  } else {
+    data.liens.forEach(l=>{
+      const statusClass=l.status==='Resolved'?'complete':l.status==='In Negotiation'?'requested':'overdue';
+      html+=`<div class="med-row">
+        <div class="med-row-top">
+          <div class="med-provider">${esc(l.lien_holder||l.provider)}</div>
+          <span class="med-status ${statusClass}">${esc(l.status||'Outstanding')}</span>
+        </div>
+        <div class="med-meta">
+          <span>Type: ${esc(l.lien_type||'—')}</span>
+          <span>Claimed: ${fmtMoney(l.lien_amount)}</span>
+          ${l.lien_negotiated?'<span>Negotiated: '+fmtMoney(l.lien_negotiated)+'</span>':''}
+        </div>
+        ${l.notes?`<div style="font-size:11px;color:var(--gray);font-style:italic">${esc(l.notes)}</div>`:''}
+        <div class="med-actions">
+          <button class="med-btn" onclick="openMedLienModal('${esc(caseName)}','${l.id}')">&#x270F; Edit</button>
+          <button class="med-btn danger" onclick="deleteMedItem('${l.id}','${esc(caseName)}','lien')">&#x1F5D1;</button>
+        </div>
+      </div>`;
+    });
+    html+=`<div style="font-size:12px;font-weight:700;color:var(--navy);padding:8px 0;text-align:right">Total Liens: ${fmtMoney(totalLiens)}</div>`;
+  }
+  html+='</div>';
+
+  // Export button
+  if(data.bills.length>0||data.liens.length>0||data.records.length>0){
+    html+=`<button class="btn-import-all" style="background:#166534;margin-top:8px" onclick="exportMedicalToWord('${esc(caseName)}')">&#x1F4D1; Export Medical Summary to Word</button>`;
+  }
+
+  el.innerHTML=html;
 }
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────
@@ -2530,6 +3005,14 @@ function confirmAmendedComplaint(){
           </div>
           <div class="detail-card-body" id="cd-defendants"></div>
         </div>
+
+        <!-- Medical -->
+        <div class="detail-card">
+          <div class="detail-card-header" style="background:#0369a1">&#x1F3E5; Medical Records, Bills &amp; Liens</div>
+          <div class="detail-card-body" id="cd-medical">
+            <div style="font-size:12px;color:var(--gray);text-align:center;padding:12px">Loading medical data...</div>
+          </div>
+        </div>
       </div>
 
       <!-- SIDEBAR -->
@@ -2649,6 +3132,154 @@ function confirmAmendedComplaint(){
       <div class="form-actions">
         <button class="btn-cancel" onclick="closeModal('rule9a-modal')">Cancel</button>
         <button class="btn-save" style="background:var(--gold)" onclick="saveRule9aDeadlines()">Add Rule 9A Deadlines</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ADD RECORDS REQUEST MODAL -->
+<div class="modal-overlay hidden" id="med-records-modal" onclick="closeModalBg(event,'med-records-modal')">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header" style="background:#0369a1">
+      <div class="modal-title" id="med-records-modal-title">&#x1F4CB; Add Records Request</div>
+      <button class="modal-close" onclick="closeModal('med-records-modal')">&#x00D7;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="med-records-case">
+      <input type="hidden" id="med-records-edit-id">
+      <div class="form-group">
+        <label class="form-label">Provider / Facility <span style="color:var(--red)">*</span></label>
+        <input class="form-input" type="text" id="med-rec-provider" placeholder="e.g. Mass General Hospital">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Date Requested</label>
+          <input class="form-input" type="date" id="med-rec-requested">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Target Date to Receive</label>
+          <input class="form-input" type="date" id="med-rec-target">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Date Received</label>
+          <input class="form-input" type="date" id="med-rec-received">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="med-rec-status">
+            <option value="pending">Pending</option>
+            <option value="requested">Requested</option>
+            <option value="received">Received</option>
+            <option value="complete">Complete</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="med-rec-notes" placeholder="Authorization sent, follow up needed, etc."></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="closeModal('med-records-modal')">Cancel</button>
+        <button class="btn-save" style="background:#0369a1" onclick="saveMedRecord()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD BILL MODAL -->
+<div class="modal-overlay hidden" id="med-bill-modal" onclick="closeModalBg(event,'med-bill-modal')">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header" style="background:#166534">
+      <div class="modal-title" id="med-bill-modal-title">&#x1F4B5; Add Medical Bill</div>
+      <button class="modal-close" onclick="closeModal('med-bill-modal')">&#x00D7;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="med-bill-case">
+      <input type="hidden" id="med-bill-edit-id">
+      <div class="form-group">
+        <label class="form-label">Provider / Facility <span style="color:var(--red)">*</span></label>
+        <input class="form-input" type="text" id="med-bill-provider" placeholder="e.g. Mass General Hospital">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Dates of Treatment</label>
+        <input class="form-input" type="text" id="med-bill-dates" placeholder="e.g. 3/15/2024 - 3/22/2024">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Amount Billed ($)</label>
+          <input class="form-input" type="number" id="med-bill-billed" placeholder="0.00" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Amount Adjusted ($)</label>
+          <input class="form-input" type="number" id="med-bill-adjusted" placeholder="0.00" step="0.01">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="med-bill-notes" placeholder="Insurance paid, balance outstanding, etc."></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="closeModal('med-bill-modal')">Cancel</button>
+        <button class="btn-save" style="background:#166534" onclick="saveMedBill()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD LIEN MODAL -->
+<div class="modal-overlay hidden" id="med-lien-modal" onclick="closeModalBg(event,'med-lien-modal')">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header" style="background:#7c2d12">
+      <div class="modal-title" id="med-lien-modal-title">&#x26A0; Add Lien</div>
+      <button class="modal-close" onclick="closeModal('med-lien-modal')">&#x00D7;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="med-lien-case">
+      <input type="hidden" id="med-lien-edit-id">
+      <div class="form-group">
+        <label class="form-label">Lienholder <span style="color:var(--red)">*</span></label>
+        <input class="form-input" type="text" id="med-lien-holder" placeholder="e.g. Medicare, Blue Cross">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Lien Type</label>
+        <select class="form-select" id="med-lien-type">
+          <option value="Medicare">Medicare</option>
+          <option value="Medicaid">Medicaid</option>
+          <option value="Health Insurance">Health Insurance</option>
+          <option value="Workers Comp">Workers Comp</option>
+          <option value="ERISA">ERISA</option>
+          <option value="Medical Provider">Medical Provider</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Claimed Amount ($)</label>
+          <input class="form-input" type="number" id="med-lien-amount" placeholder="0.00" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Negotiated Amount ($)</label>
+          <input class="form-input" type="number" id="med-lien-negotiated" placeholder="0.00" step="0.01">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="med-lien-status">
+          <option value="Outstanding">Outstanding</option>
+          <option value="In Negotiation">In Negotiation</option>
+          <option value="Resolved">Resolved</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="med-lien-notes"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="closeModal('med-lien-modal')">Cancel</button>
+        <button class="btn-save" style="background:#7c2d12" onclick="saveMedLien()">Save</button>
       </div>
     </div>
   </div>
