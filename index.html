@@ -1421,7 +1421,7 @@ function saveMotionDeadline(){
   const court=getEffectiveCourt();
   const rules=MOTION_RULES[court]||MOTION_RULES['D. Mass. Federal'];
   const days=rules[motionType]||rules.standard;
-  const oppDate=addDays(servedDate,days);
+  const {date:oppDate,notes:oppNotes}=safeDeadline(addDays(servedDate,days),court+' — '+days+' days from service ('+servedDate+'). '+rules.label+'. Verify court order has not set different deadline.');
   const motionLabel=desc||document.getElementById('motion-type-select').options[document.getElementById('motion-type-select').selectedIndex].text;
   const dl={
     id:uid(),
@@ -1429,7 +1429,7 @@ function saveMotionDeadline(){
     event:'Opposition to '+motionLabel+' Due',
     date:oppDate,
     type:'motion',
-    notes:court+' — '+days+' days from service ('+servedDate+'). '+rules.label+'. Verify court order has not set different deadline.',
+    notes:oppNotes,
     perspective:'mine',
     pushed:false
   };
@@ -1569,10 +1569,13 @@ function saveDefendantService(){
   const intDays=isNH?10:(isFed?30:45);
   const docDays=30;
   const courtLabel=isFed?'Federal Court':isNH?'NH Superior Court':'MA Superior Court';
+  const dsa1=safeDeadline(addDays(svcDate,answerDays),courtLabel+' — '+answerDays+' days from service ('+svcDate+').');
+  const dsa2=safeDeadline(addDays(svcDate,intDays),courtLabel+' — '+intDays+' days from service ('+svcDate+').');
+  const dsa3=safeDeadline(addDays(svcDate,docDays),courtLabel+' — '+docDays+' days from service ('+svcDate+').');
   const toAdd=[
-    {event:defName+' — Answer to Complaint Due',date:addDays(svcDate,answerDays),type:'service',notes:courtLabel+' — '+answerDays+' days from service ('+svcDate+').'},
-    {event:defName+' — Interrogatory Responses Due',date:addDays(svcDate,intDays),type:'discovery',notes:courtLabel+' — '+intDays+' days from service ('+svcDate+').'},
-    {event:defName+' — Document Request Responses Due',date:addDays(svcDate,docDays),type:'discovery',notes:courtLabel+' — '+docDays+' days from service ('+svcDate+').'},
+    {event:defName+' — Answer to Complaint Due',date:dsa1.date,type:'service',notes:dsa1.notes},
+    {event:defName+' — Interrogatory Responses Due',date:dsa2.date,type:'discovery',notes:dsa2.notes},
+    {event:defName+' — Document Request Responses Due',date:dsa3.date,type:'discovery',notes:dsa3.notes},
   ];
   toAdd.forEach(d=>deadlines.push({id:uid(),case:caseName,...d,perspective:'defendant',pushed:false}));
   saveDeadlines();
@@ -1603,6 +1606,68 @@ function saveApiKey(){
   document.getElementById('api-key-section').style.display='none';
   document.getElementById('api-key-input').value='';
   notify('API key saved',true);
+}
+
+// ── HOLIDAY AWARENESS ─────────────────────────────────────────────────────
+// Federal + MA + NH court holidays
+function getHolidays(year){
+  const h=[];
+  // Fixed federal holidays
+  h.push(`${year}-01-01`); // New Year's Day
+  h.push(`${year}-06-19`); // Juneteenth
+  h.push(`${year}-07-04`); // Independence Day
+  h.push(`${year}-11-11`); // Veterans Day
+  h.push(`${year}-12-25`); // Christmas
+
+  // Floating federal holidays
+  function nthMonday(y,m,n){const d=new Date(y,m,1);const day=d.getDay();const first=day===1?1:1+(8-day)%7;return new Date(y,m,first+(n-1)*7).toISOString().slice(0,10);}
+  function lastMonday(y,m){const last=new Date(y,m+1,0);const day=last.getDay();const d=day===1?last.getDate():last.getDate()-(day===0?6:day-1);return new Date(y,m,d).toISOString().slice(0,10);}
+  function nthDay(y,m,dow,n){const d=new Date(y,m,1);const first=(dow-d.getDay()+7)%7+1;return new Date(y,m,first+(n-1)*7).toISOString().slice(0,10);}
+
+  h.push(nthMonday(year,0,3)); // MLK Day - 3rd Monday Jan
+  h.push(nthMonday(year,1,3)); // Presidents Day - 3rd Monday Feb
+  h.push(lastMonday(year,4));  // Memorial Day - last Monday May
+  h.push(nthMonday(year,8,1)); // Labor Day - 1st Monday Sep
+  h.push(nthDay(year,9,1,2));  // Columbus Day - 2nd Monday Oct
+  h.push(nthDay(year,10,4,4)); // Thanksgiving - 4th Thursday Nov
+
+  // MA-specific court holidays
+  h.push(`${year}-04-19`); // Patriots Day (3rd Monday April, approximate)
+  // Recalculate Patriots Day properly - 3rd Monday in April
+  h.pop();
+  h.push(nthMonday(year,3,3)); // Patriots Day - 3rd Monday April
+  h.push(`${year}-03-17`); // Evacuation Day (Suffolk County)
+  h.push(`${year}-06-17`); // Bunker Hill Day (Suffolk County)
+
+  return h;
+}
+
+function isHoliday(dateStr){
+  const year=parseInt(dateStr.slice(0,4));
+  const holidays=getHolidays(year).concat(getHolidays(year+1));
+  return holidays.includes(dateStr);
+}
+
+function isWeekend(dateStr){
+  const d=new Date(dateStr+'T00:00:00');
+  return d.getDay()===0||d.getDay()===6;
+}
+
+function nextCourtDay(dateStr){
+  let d=new Date(dateStr+'T00:00:00');
+  while(true){
+    const s=d.toISOString().slice(0,10);
+    if(!isWeekend(s)&&!isHoliday(s)) return s;
+    d.setDate(d.getDate()+1);
+  }
+}
+
+function safeDeadline(dateStr, notes){
+  const safe=nextCourtDay(dateStr);
+  if(safe!==dateStr){
+    return {date:safe, notes:(notes||'')+(notes?' ':'')+'[Adjusted from '+fmtShort(dateStr)+' — fell on weekend/holiday]'};
+  }
+  return {date:dateStr, notes:notes||''};
 }
 
 // ── CASE DETAIL VIEW ──────────────────────────────────────────────────────
@@ -1672,7 +1737,9 @@ function renderCaseDetail(caseName){
       actionsHTML += `<button class="detail-action-btn blue-btn" onclick="openTrialModal('${esc(caseName)}')"><span class="btn-icon-emoji">&#x2696;</span>Log Trial Date</button>`;
       actionsHTML += `<button class="detail-action-btn blue-btn" onclick="openFilingDateModal('${esc(caseName)}')"><span class="btn-icon-emoji">&#x1F4C5;</span>Log Filing / Discovery</button>`;
       actionsHTML += `<button class="detail-action-btn" onclick="openAmendModal('${esc(caseName)}')"><span class="btn-icon-emoji">&#x270F;</span>Amended Complaint</button>`;
+      actionsHTML += `<button class="detail-action-btn" onclick="openRule9aModal('${esc(caseName)}')"><span class="btn-icon-emoji">&#x1F4E4;</span>Log Motion Served on Defendant</button>`;
     }
+    actionsHTML += `<button class="detail-action-btn" onclick="openMediationModal('${esc(caseName)}')"><span class="btn-icon-emoji">&#x1F91D;</span>Log Mediation Date</button>`;
     actionsHTML += `<button class="detail-action-btn" onclick="openAddModalForCase()"><span class="btn-icon-emoji">+</span>Add Deadline</button>`;
     actionsHTML += `<hr style="border:none;border-top:1px solid var(--border);margin:8px 0">`;
     actionsHTML += `<button class="detail-action-btn red-btn" onclick="resolveCaseFromDetail('${esc(caseName)}')"><span class="btn-icon-emoji">&#x2713;</span>Resolve / Close Case</button>`;
@@ -1847,13 +1914,17 @@ function saveTrialDeadlines(){
   if(!trialDate){alert('Please enter the trial date.');return;}
   if(!ftcDate){alert('Please enter the Final Trial Conference date.');return;}
 
+  const sd1=safeDeadline(addDays(trialDate,-30),'Serve under Rule 9A — 30 days before trial. Opposition due 13 days after service.');
+  const sd2=safeDeadline(addDays(ftcDate,-10),'Exchange exhibit lists 10 days before Final Trial Conference.');
+  const sd3=safeDeadline(addBusinessDays(ftcDate,5),'5 business days before Final Trial Conference. Superior Court Rule 6.');
+  const sd4=safeDeadline(addBusinessDays(ftcDate,5),'5 business days before Final Trial Conference.');
   const toAdd=[
     {event:'Trial',date:trialDate,type:'trial',notes:'Trial date.',perspective:'mine'},
     {event:'Final Trial Conference',date:ftcDate,type:'court',notes:'Final Trial Conference — set by judge.',perspective:'mine'},
-    {event:'Serve Motions in Limine',date:addDays(trialDate,-30),type:'motion',notes:'Serve under Rule 9A — 30 days before trial. Opposition due 13 days after service.',perspective:'mine'},
-    {event:'Exhibit List Exchange',date:addDays(ftcDate,-10),type:'discovery',notes:'Exchange exhibit lists 10 days before Final Trial Conference.',perspective:'mine'},
-    {event:'Motion for Voir Dire Due',date:addBusinessDays(ftcDate,5),type:'motion',notes:'5 business days before Final Trial Conference. Superior Court Rule 6.',perspective:'mine'},
-    {event:'Proposed Jury Instructions Due',date:addBusinessDays(ftcDate,5),type:'other',notes:'5 business days before Final Trial Conference.',perspective:'mine'},
+    {event:'Serve Motions in Limine',date:sd1.date,type:'motion',notes:sd1.notes,perspective:'mine'},
+    {event:'Exhibit List Exchange',date:sd2.date,type:'discovery',notes:sd2.notes,perspective:'mine'},
+    {event:'Motion for Voir Dire Due',date:sd3.date,type:'motion',notes:sd3.notes,perspective:'mine'},
+    {event:'Proposed Jury Instructions Due',date:sd4.date,type:'other',notes:sd4.notes,perspective:'mine'},
   ];
 
   toAdd.forEach(d=>deadlines.push({id:uid(),case:caseName,...d,pushed:false}));
@@ -1863,6 +1934,98 @@ function saveTrialDeadlines(){
   updateStats();
   refreshDetailIfOpen();
   notify('Trial deadlines added — '+toAdd.length+' deadlines created',true);
+}
+
+// ── MEDIATION ─────────────────────────────────────────────────────────────
+function openMediationModal(caseName){
+  document.getElementById('med-case-name').value=caseName;
+  document.getElementById('med-case-display').textContent=caseName;
+  document.getElementById('med-date').value='';
+  document.getElementById('med-mediator').value='';
+  document.getElementById('med-preview').style.display='none';
+  document.getElementById('mediation-modal').classList.remove('hidden');
+}
+function updateMedPreview(){
+  const md=document.getElementById('med-date').value;
+  const mediator=document.getElementById('med-mediator').value.trim();
+  const prev=document.getElementById('med-preview');
+  if(!md){prev.style.display='none';return;}
+  const stmtDate=safeDeadline(addDays(md,-7),'Mediation statement due 7 days before mediation.').date;
+  prev.style.display='block';
+  prev.innerHTML=`&#x1F91D; Mediation: <strong>${fmtDate(md)}</strong>${mediator?' — '+esc(mediator):''}<br>&#x1F4C4; Mediation Statement Due: <strong>${fmtDate(stmtDate)}</strong> (7 days before)`;
+}
+function saveMediationDeadlines(){
+  const caseName=document.getElementById('med-case-name').value;
+  const md=document.getElementById('med-date').value;
+  const mediator=document.getElementById('med-mediator').value.trim();
+  if(!md){alert('Please enter the mediation date.');return;}
+  const stmtRaw=addDays(md,-7);
+  const {date:stmtDate,notes:stmtNotes}=safeDeadline(stmtRaw,'Mediation statement due 7 days before mediation'+(mediator?' with '+mediator:'')+'. Verify mediator requirements.');
+  const toAdd=[
+    {id:uid(),case:caseName,event:'Mediation'+(mediator?' — '+mediator:''),date:md,type:'mediation',notes:'Mediation'+(mediator?' — '+mediator:'')+'. Prepare mediation statement.',perspective:'mine',pushed:false},
+    {id:uid(),case:caseName,event:'Mediation Statement Due',date:stmtDate,type:'other',notes:stmtNotes,perspective:'mine',pushed:false},
+  ];
+  toAdd.forEach(d=>deadlines.push(d));
+  saveDeadlines();
+  document.getElementById('mediation-modal').classList.add('hidden');
+  renderView();updateStats();refreshDetailIfOpen();
+  notify('Mediation deadlines added',true);
+}
+
+// ── RULE 9A TRACKING ──────────────────────────────────────────────────────
+function openRule9aModal(caseName){
+  document.getElementById('r9a-case-name').value=caseName;
+  document.getElementById('r9a-case-display').textContent=caseName;
+  document.getElementById('r9a-motion-name').value='';
+  document.getElementById('r9a-served-date').value='';
+  document.getElementById('r9a-preview').style.display='none';
+  // Pre-fill court from case record
+  const c=cases.find(x=>x.name===caseName);
+  if(c&&c.court){
+    const sel=document.getElementById('r9a-court');
+    for(let i=0;i<sel.options.length;i++){
+      if(sel.options[i].value===c.court){sel.selectedIndex=i;break;}
+    }
+  }
+  document.getElementById('rule9a-modal').classList.remove('hidden');
+}
+function updateR9aPreview(){
+  const sd=document.getElementById('r9a-served-date').value;
+  const motion=document.getElementById('r9a-motion-name').value.trim();
+  const court=document.getElementById('r9a-court').value;
+  const type=document.getElementById('r9a-motion-type').value;
+  const prev=document.getElementById('r9a-preview');
+  if(!sd||!motion){prev.style.display='none';return;}
+  const rules=MOTION_RULES[court]||MOTION_RULES['D. Mass. Federal'];
+  const oppDays=rules[type]||rules.standard;
+  const {date:oppDate}=safeDeadline(addDays(sd,oppDays),'');
+  // Filing date: MA Rule 9A requires filing after opposition window + 7 days for reply
+  const replyDays=court==='D. Mass. Federal'?7:7;
+  const {date:fileDate}=safeDeadline(addDays(oppDate,replyDays),'');
+  prev.style.display='block';
+  prev.innerHTML=`&#x1F4E4; Served: <strong>${fmtDate(sd)}</strong><br>&#x23F3; Opposition window closes: <strong>${fmtDate(oppDate)}</strong> (${oppDays} days)<br>&#x1F4CB; Ready to file with court: <strong>${fmtDate(fileDate)}</strong> (after reply period)`;
+}
+function saveRule9aDeadlines(){
+  const caseName=document.getElementById('r9a-case-name').value;
+  const sd=document.getElementById('r9a-served-date').value;
+  const motion=document.getElementById('r9a-motion-name').value.trim();
+  const court=document.getElementById('r9a-court').value;
+  const type=document.getElementById('r9a-motion-type').value;
+  if(!motion){alert('Please enter the motion description.');return;}
+  if(!sd){alert('Please enter the date you served the motion.');return;}
+  const rules=MOTION_RULES[court]||MOTION_RULES['D. Mass. Federal'];
+  const oppDays=rules[type]||rules.standard;
+  const {date:oppDate,notes:oppNotes}=safeDeadline(addDays(sd,oppDays),court+' — opponent has '+oppDays+' days to serve opposition from '+sd+'. '+rules.label+'.');
+  const {date:fileDate,notes:fileNotes}=safeDeadline(addDays(oppDate,7),'File motion package with court after opposition/reply period closes. Verify no opposition was served.');
+  const toAdd=[
+    {id:uid(),case:caseName,event:'Opposition Window Closes — '+motion,date:oppDate,type:'motion',notes:oppNotes,perspective:'mine',pushed:false},
+    {id:uid(),case:caseName,event:'File Motion Package with Court — '+motion,date:fileDate,type:'motion',notes:fileNotes,perspective:'mine',pushed:false},
+  ];
+  toAdd.forEach(d=>deadlines.push(d));
+  saveDeadlines();
+  document.getElementById('rule9a-modal').classList.add('hidden');
+  renderView();updateStats();refreshDetailIfOpen();
+  notify('Rule 9A deadlines added for '+motion,true);
 }
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────
@@ -2413,6 +2576,79 @@ function confirmAmendedComplaint(){
       <div class="form-actions">
         <button class="btn-cancel" onclick="closeModal('trial-modal')">Cancel</button>
         <button class="btn-save" style="background:#dc2626" onclick="saveTrialDeadlines()">Add All Pretrial Deadlines</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- MEDIATION MODAL -->
+<div class="modal-overlay hidden" id="mediation-modal" onclick="closeModalBg(event,'mediation-modal')">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header" style="background:var(--purple)">
+      <div class="modal-title">&#x1F91D; Log Mediation Date</div>
+      <button class="modal-close" onclick="closeModal('mediation-modal')">&#x00D7;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="med-case-name">
+      <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:16px;padding:8px 12px;background:#fdf4ff;border-radius:6px" id="med-case-display"></div>
+      <div class="form-group">
+        <label class="form-label">Mediation Date <span style="color:var(--red)">*</span></label>
+        <input class="form-input" type="date" id="med-date" oninput="updateMedPreview()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Mediator / Service (optional)</label>
+        <input class="form-input" type="text" id="med-mediator" placeholder="e.g. JAMS, Judge Smith (ret.)">
+      </div>
+      <div id="med-preview" style="display:none;background:#fdf4ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px 14px;margin-top:4px;font-size:12px;color:#6b21a8;line-height:1.6"></div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="closeModal('mediation-modal')">Cancel</button>
+        <button class="btn-save" style="background:var(--purple)" onclick="saveMediationDeadlines()">Add Mediation Deadlines</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RULE 9A MODAL (motion served on defendant) -->
+<div class="modal-overlay hidden" id="rule9a-modal" onclick="closeModalBg(event,'rule9a-modal')">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header" style="background:var(--gold)">
+      <div class="modal-title">&#x1F4E4; Log Motion Served on Defendant</div>
+      <button class="modal-close" onclick="closeModal('rule9a-modal')">&#x00D7;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="r9a-case-name">
+      <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:16px;padding:8px 12px;background:#fffbeb;border-radius:6px" id="r9a-case-display"></div>
+      <div class="info-box" style="margin-bottom:14px">When you serve a motion on the defendant, the tracker will calculate when their opposition window closes and remind you to file the full package with the court.</div>
+      <div class="form-group">
+        <label class="form-label">Motion Description <span style="color:var(--red)">*</span></label>
+        <input class="form-input" type="text" id="r9a-motion-name" placeholder="e.g. Motion for Summary Judgment" oninput="updateR9aPreview()">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Date Served on Defendant <span style="color:var(--red)">*</span></label>
+          <input class="form-input" type="date" id="r9a-served-date" oninput="updateR9aPreview()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Court</label>
+          <select class="form-select" id="r9a-court" onchange="updateR9aPreview()">
+            <option value="MA Superior Court">MA Superior Court</option>
+            <option value="NH Superior Court">NH Superior Court</option>
+            <option value="D. Mass. Federal">D. Mass. Federal</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Motion Type</label>
+        <select class="form-select" id="r9a-motion-type" onchange="updateR9aPreview()">
+          <option value="standard">Standard Motion</option>
+          <option value="summary_judgment">Motion for Summary Judgment</option>
+        </select>
+      </div>
+      <div id="r9a-preview" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-top:4px;font-size:12px;color:#92400e;line-height:1.6"></div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="closeModal('rule9a-modal')">Cancel</button>
+        <button class="btn-save" style="background:var(--gold)" onclick="saveRule9aDeadlines()">Add Rule 9A Deadlines</button>
       </div>
     </div>
   </div>
