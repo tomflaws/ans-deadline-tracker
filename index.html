@@ -685,7 +685,7 @@ function switchTab(t){
     document.getElementById('tab-'+p).classList.toggle('active',p===t);
   });
   populateDropdowns();
-  if(t==='cases')renderCases();
+  if(t==='cases'){renderCases();setTimeout(()=>loadAllMedical(),100);}
   else if(t==='deadlines')renderView();
   if(t==='motion'){
     const mc=document.getElementById('motion-case');
@@ -1354,8 +1354,7 @@ async function loadAllMedical(){
       if(medicalData[r.case_name][cat]) medicalData[r.case_name][cat].push(r);
     });
     // Always re-render cases after loading so badges appear
-    const caseContent=document.getElementById('case-content');
-    if(caseContent) renderCases();
+    renderCases();
   }catch(e){console.error('loadAllMedical error:',e);}
 }
 
