@@ -1072,6 +1072,7 @@ function renderCases(){
     const soon=caseDeadlines.filter(d=>{const x=daysUntil(d.date);return x>7&&x<=21;}).length;
     const deadlineBadge=urgent?`<span style="background:#fee2e2;color:#7f1d1d;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px">&#x2691; ${urgent} urgent</span>`:soon?`<span style="background:#fff7ed;color:#92400e;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px">${soon} soon</span>`:'';
     const overdueRecs=getOverdueRecords(c.name);
+    if(overdueRecs.length) console.log('Overdue records for:',c.name, overdueRecs.length);
     const recBadge=overdueRecs.length?`<span class="med-records-badge">&#x1F4CB; ${overdueRecs.length} records overdue</span>`:'';
     return `<tr class="${c.status==='resolved'?'resolved':''}" style="cursor:pointer" onclick="openCase('${esc(c.name)}')">
       <td style="max-width:300px">
@@ -2089,7 +2090,11 @@ const SB_MED_HEADERS={...SB_HEADERS};
 let medicalData={}; // {caseName: {records:[], bills:[], liens:[]}}
 
 function getMedical(caseName){
-  return medicalData[caseName]||{records:[],bills:[],liens:[]};
+  // Try exact match first, then case-insensitive
+  if(medicalData[caseName]) return medicalData[caseName];
+  const lower=caseName.toLowerCase();
+  const key=Object.keys(medicalData).find(k=>k.toLowerCase()===lower);
+  return key?medicalData[key]:{records:[],bills:[],liens:[]};
 }
 
 async function loadMedical(caseName){
