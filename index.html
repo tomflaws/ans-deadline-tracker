@@ -1181,9 +1181,71 @@ function saveDeadline(){
   const dt=document.getElementById('form-date').value,tp=document.getElementById('form-type').value;
   const nt=document.getElementById('form-notes').value.trim(),eid=document.getElementById('edit-id').value;
   if(!cv){alert('Please select a case.');return;}if(!ev){alert('Please enter a deadline name.');return;}if(!dt){alert('Please enter a date.');return;}
+  const oldDate = eid ? (deadlines.find(x=>x.id===eid)||{}).date : null;
   if(eid){const i=deadlines.findIndex(x=>x.id===eid);if(i>=0)deadlines[i]={...deadlines[i],case:cv,event:ev,date:dt,type:tp,notes:nt,perspective:currentPerspective};}
   else deadlines.push({id:uid(),case:cv,event:ev,date:dt,type:tp,notes:nt,perspective:currentPerspective,pushed:false});
-  saveDeadlines();document.getElementById('add-modal').classList.add('hidden');renderView();refreshDetailIfOpen();notify('Deadline saved',true);
+  saveDeadlines();
+  document.getElementById('add-modal').classList.add('hidden');
+  // Smart recalculation for linked deadlines
+  if(eid && oldDate && dt !== oldDate){
+    checkLinkedDeadlines(cv, ev, dt, eid);
+  }
+  renderView();refreshDetailIfOpen();notify('Deadline saved',true);
+}
+
+function checkLinkedDeadlines(caseName, eventName, newDate, editedId){
+  const evLower = eventName.toLowerCase();
+  
+  // FTC moved → recalculate Motions in Limine, Exhibit List, Voir Dire, Jury Instructions
+  if(evLower.includes('final trial conference')){
+    const linked = [
+      {match:'Serve Motions in Limine', newDate:()=>safeDeadline(addDays(newDate,-30),'Serve under Rule 9A — 30 days before Final Trial Conference. Opposition due 13 days after service.').date},
+      {match:'Exhibit List Exchange', newDate:()=>safeDeadline(addDays(newDate,-10),'Exchange exhibit lists 10 days before Final Trial Conference.').date},
+      {match:'Motion for Voir Dire', newDate:()=>addBusinessDays(newDate,5)},
+      {match:'Proposed Jury Instructions', newDate:()=>addBusinessDays(newDate,5)},
+    ];
+    offerLinkedUpdate(caseName, linked, 'Final Trial Conference moved', editedId);
+  }
+  
+  // Mediation moved → recalculate Mediation Statement
+  else if(evLower.includes('mediation') && !evLower.includes('statement')){
+    const linked = [
+      {match:'Mediation Statement', newDate:()=>safeDeadline(addDays(newDate,-7),'Mediation statement due 7 days before mediation.').date},
+    ];
+    offerLinkedUpdate(caseName, linked, 'Mediation date moved', editedId);
+  }
+}
+
+function offerLinkedUpdate(caseName, linkedRules, reason, editedId){
+  // Find which linked deadlines exist for this case
+  const toUpdate = [];
+  linkedRules.forEach(rule => {
+    const dl = deadlines.find(d =>
+      d.case === caseName &&
+      d.id !== editedId &&
+      d.event.toLowerCase().includes(rule.match.toLowerCase())
+    );
+    if(dl){
+      const newDt = rule.newDate();
+      if(newDt !== dl.date){
+        toUpdate.push({dl, newDt, rule});
+      }
+    }
+  });
+  
+  if(!toUpdate.length) return;
+  
+  const names = toUpdate.map(x=>x.dl.event).join(', ');
+  if(confirm(reason + ' — update linked deadlines?\n\n' + toUpdate.map(x=>`• ${x.dl.event}: ${fmtShort(x.dl.date)} → ${fmtShort(x.newDt)}`).join('\n'))){
+    toUpdate.forEach(({dl, newDt}) => {
+      const i = deadlines.findIndex(x=>x.id===dl.id);
+      if(i>=0) deadlines[i] = {...deadlines[i], date: newDt};
+    });
+    saveDeadlines();
+    renderView();
+    refreshDetailIfOpen();
+    notify('Linked deadlines updated',true);
+  }
 }
 function deleteDeadline(id){if(!confirm('Delete this deadline?'))return;deadlines=deadlines.filter(x=>x.id!==id);deleteDeadlineFromDb(id);renderView();notify('Deadline deleted');}
 
@@ -1948,7 +2010,7 @@ function updateTrialPreview(){
   const deadlinesList=[
     {event:'Trial',date:trialDate,type:'trial',notes:'Trial date.'},
     {event:'Final Trial Conference',date:ftcDate,type:'court',notes:'Final Trial Conference — set by judge.'},
-    {event:'Serve Motions in Limine',date:addDays(trialDate,-30),type:'motion',notes:'Serve under Rule 9A — 30 days before trial. Opposition due 13 days after service.'},
+    {event:'Serve Motions in Limine',date:addDays(ftcDate,-30),type:'motion',notes:'Serve under Rule 9A — 30 days before Final Trial Conference. Opposition due 13 days after service.'},
     {event:'Exhibit List Exchange',date:addDays(ftcDate,-10),type:'discovery',notes:'Exchange exhibit lists 10 days before Final Trial Conference.'},
     {event:'Motion for Voir Dire Due',date:addBusinessDays(ftcDate,5),type:'motion',notes:'5 business days before Final Trial Conference. Superior Court Rule 6.'},
     {event:'Proposed Jury Instructions Due',date:addBusinessDays(ftcDate,5),type:'other',notes:'5 business days before Final Trial Conference.'},
@@ -1976,7 +2038,7 @@ function saveTrialDeadlines(){
   if(!trialDate){alert('Please enter the trial date.');return;}
   if(!ftcDate){alert('Please enter the Final Trial Conference date.');return;}
 
-  const sd1=safeDeadline(addDays(trialDate,-30),'Serve under Rule 9A — 30 days before trial. Opposition due 13 days after service.');
+  const sd1=safeDeadline(addDays(ftcDate,-30),'Serve under Rule 9A — 30 days before Final Trial Conference. Opposition due 13 days after service.');
   const sd2=safeDeadline(addDays(ftcDate,-10),'Exchange exhibit lists 10 days before Final Trial Conference.');
   const sd3=safeDeadline(addBusinessDays(ftcDate,5),'5 business days before Final Trial Conference. Superior Court Rule 6.');
   const sd4=safeDeadline(addBusinessDays(ftcDate,5),'5 business days before Final Trial Conference.');
