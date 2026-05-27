@@ -2472,6 +2472,7 @@ async function renderMedicalSection(caseName){
         <div class="med-actions">
           <button class="med-btn" onclick="openMedRecordsModal('${esc(caseName)}','${r.id}')">&#x270F; Edit</button>
           <button class="med-btn danger" onclick="deleteMedItem('${r.id}','${esc(caseName)}','record')">&#x1F5D1;</button>
+          ${r.target_date?`<button class="med-btn primary" onclick="openMedOutlookModal('${r.id}','${esc(caseName)}','record')">&#x2192; Cal</button>`:''}
         </div>
       </div>`;
     });
@@ -2503,6 +2504,7 @@ async function renderMedicalSection(caseName){
         <div class="med-actions">
           <button class="med-btn" onclick="openMedBillModal('${esc(caseName)}','${b.id}')">&#x270F; Edit</button>
           <button class="med-btn danger" onclick="deleteMedItem('${b.id}','${esc(caseName)}','bill')">&#x1F5D1;</button>
+          ${b.dates_of_treatment?`<button class="med-btn primary" onclick="openMedOutlookModal('${b.id}','${esc(caseName)}','bill')">&#x2192; Cal</button>`:''}
         </div>
       </div>`;
     });
@@ -2550,6 +2552,46 @@ async function renderMedicalSection(caseName){
   }
 
   el.innerHTML=html;
+}
+
+// ── MEDICAL CALENDAR PUSH ─────────────────────────────────────────────────
+function openMedOutlookModal(id, caseName, category){
+  // Build a temporary deadline object for the outlook modal
+  const data=getMedical(caseName);
+  const cat=category+'s';
+  const item=data[cat]&&data[cat].find(r=>r.id===id);
+  if(!item) return;
+
+  let event='', date='', notes='', type='other';
+  if(category==='record'){
+    event='Records Request Follow-Up: '+item.provider;
+    date=item.target_date||item.date_requested||'';
+    notes='Case: '+caseName+'\nProvider: '+item.provider+(item.date_requested?'\nRequested: '+item.date_requested:'')+(item.target_date?'\nTarget date: '+item.target_date:'');
+    type='other';
+  } else if(category==='bill'){
+    event='Medical Bill: '+item.provider;
+    date=item.dates_of_treatment||'';
+    notes='Case: '+caseName+'\nProvider: '+item.provider+(item.dates_of_treatment?'\nDates of treatment: '+item.dates_of_treatment:'')+(item.amount_billed?'\nAmount billed: $'+parseFloat(item.amount_billed).toLocaleString():'');
+    type='other';
+  }
+
+  if(!date){alert('No date available to add to calendar. Please enter a target date or treatment date first.');return;}
+
+  // Use the existing outlook modal with a temporary deadline object
+  outlookDeadline={id:'med_'+id, case:caseName, event, date, type, notes, pushed:item.calPushed||false};
+  const n=daysUntil(date);
+  const dt=n<0?Math.abs(n)+' days overdue':n===0?'Today':n+' days away';
+  document.getElementById('outlook-preview').innerHTML=`<h4>&#x1F4C5; ${esc(event)}</h4>
+    <div class="outlook-field"><span class="outlook-field-label">Case:</span><span>${esc(caseName)}</span></div>
+    <div class="outlook-field"><span class="outlook-field-label">Date:</span><span>${fmtDate(date)} (${dt})</span></div>
+    ${notes?`<div class="outlook-field"><span class="outlook-field-label">Notes:</span><span style="font-size:11px">${esc(notes)}</span></div>`:''}`;
+  selectedReminders=defaultReminders(type);
+  document.querySelectorAll('.reminder-chip').forEach(chip=>chip.classList.toggle('selected',selectedReminders.includes(parseInt(chip.dataset.val))));
+  // Store reference so markPushed works (we'll handle separately for medical)
+  outlookDeadline._medId=id;
+  outlookDeadline._medCase=caseName;
+  outlookDeadline._medCat=category;
+  document.getElementById('outlook-modal').classList.remove('hidden');
 }
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────
