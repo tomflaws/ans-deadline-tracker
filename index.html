@@ -2373,8 +2373,14 @@ function exportMedicalToWord(caseName){
   const data=getMedical(caseName);
   if(!data.bills.length){alert('No bills to export.');return;}
 
+  // Check docx library is loaded
+  const docxLib=window.docx||window.Docx||window.DOCX;
+  if(!docxLib||!docxLib.Document){
+    alert('Document export library not loaded yet. Please wait a moment and try again.');
+    return;
+  }
   const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,
-    AlignmentType,BorderStyle,WidthType,ShadingType,VerticalAlign}=docx;
+    AlignmentType,BorderStyle,WidthType,ShadingType,VerticalAlign}=docxLib;
 
   const NAVY="0F2044";
   const NAVY_LIGHT="E8ECF4";
