@@ -685,7 +685,7 @@ function switchTab(t){
     document.getElementById('tab-'+p).classList.toggle('active',p===t);
   });
   populateDropdowns();
-  if(t==='cases'){loadAllMedical().then(()=>renderCases());}
+  if(t==='cases'){renderCases();loadAllMedical();}
   else if(t==='deadlines')renderView();
   if(t==='motion'){
     const mc=document.getElementById('motion-case');
@@ -1347,20 +1347,24 @@ async function loadFromSupabase(){
   }
 }
 
+let medicalLoading=false;
 async function loadAllMedical(){
+  if(medicalLoading) return;
+  medicalLoading=true;
   try{
     const rows=await sbGet('medical','select=*');
-    if(!rows||!rows.length) return;
-    // Reset and rebuild from scratch to avoid duplicates
-    const fresh={};
-    rows.forEach(r=>{
-      if(!fresh[r.case_name]) fresh[r.case_name]={records:[],bills:[],liens:[]};
-      const cat=r.category+'s';
-      if(fresh[r.case_name][cat]) fresh[r.case_name][cat].push(r);
-    });
-    medicalData=fresh;
-    renderCases();
+    if(rows&&rows.length){
+      const fresh={};
+      rows.forEach(r=>{
+        if(!fresh[r.case_name]) fresh[r.case_name]={records:[],bills:[],liens:[]};
+        const cat=r.category+'s';
+        if(fresh[r.case_name][cat]) fresh[r.case_name][cat].push(r);
+      });
+      medicalData=fresh;
+      renderCases();
+    }
   }catch(e){console.error('loadAllMedical error:',e);}
+  finally{medicalLoading=false;}
 }
 
 // ── NEW CASE MODAL ────────────────────────────────────────────────────────
