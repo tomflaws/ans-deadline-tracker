@@ -270,7 +270,7 @@
 .med-summary-item{text-align:center}
 .med-summary-num{font-size:18px;font-weight:900;color:var(--navy)}
 .med-summary-label{font-size:10px;color:var(--gray);font-weight:600;text-transform:uppercase;margin-top:2px}
-.med-records-badge{background:#fff7ed;color:#92400e;border:1px solid #fcd34d;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px}
+.med-records-badge{background:#fee2e2;color:#7f1d1d;border:1px solid #fca5a5;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:6px}
 </style>
 </head>
 <body>
@@ -1332,11 +1332,30 @@ async function loadFromSupabase(){
       localStorage.setItem('ans_dl_v3',JSON.stringify(deadlines));
     }
     if(sbStatus){sbStatus.textContent='\u25CF Live';sbStatus.style.color='#4ade80';}
+    // Preload medical data for all cases so overdue badges show in Case Manager
+    loadAllMedical();
   }catch(e){
     console.error('Supabase load failed:',e);
     const sbStatus=document.getElementById('sync-status');
     if(sbStatus){sbStatus.textContent='\u25CF Offline';sbStatus.style.color='#f87171';}
   }
+}
+
+async function loadAllMedical(){
+  try{
+    const rows=await sbGet('medical','select=*');
+    if(!rows||!rows.length) return;
+    // Group by case_name
+    rows.forEach(r=>{
+      if(!medicalData[r.case_name]) medicalData[r.case_name]={records:[],bills:[],liens:[]};
+      const cat=r.category+'s';
+      if(medicalData[r.case_name][cat]) medicalData[r.case_name][cat].push(r);
+    });
+    // Re-render cases to show badges
+    if(document.getElementById('case-content')&&document.getElementById('pane-cases')&&!document.getElementById('pane-cases').classList.contains('hidden')){
+      renderCases();
+    }
+  }catch(e){console.error('loadAllMedical error:',e);}
 }
 
 // ── NEW CASE MODAL ────────────────────────────────────────────────────────
@@ -2186,11 +2205,10 @@ function openMedBillModal(caseName, editId){
       document.getElementById('med-bill-provider').value=bill.provider||'';
       document.getElementById('med-bill-dates').value=bill.dates_of_treatment||'';
       document.getElementById('med-bill-billed').value=bill.amount_billed||'';
-      document.getElementById('med-bill-adjusted').value=bill.amount_adjusted||'';
       document.getElementById('med-bill-notes').value=bill.notes||'';
     }
   } else {
-    ['med-bill-provider','med-bill-dates','med-bill-billed','med-bill-adjusted','med-bill-notes'].forEach(id=>document.getElementById(id).value='');
+    ['med-bill-provider','med-bill-dates','med-bill-billed','med-bill-notes'].forEach(id=>document.getElementById(id).value='');
   }
   document.getElementById('med-bill-modal').classList.remove('hidden');
 }
@@ -2207,7 +2225,7 @@ async function saveMedBill(){
     provider,
     dates_of_treatment:document.getElementById('med-bill-dates').value.trim()||null,
     amount_billed:parseFloat(document.getElementById('med-bill-billed').value)||null,
-    amount_adjusted:parseFloat(document.getElementById('med-bill-adjusted').value)||null,
+    amount_adjusted:null,
     notes:document.getElementById('med-bill-notes').value.trim()||null,
     date_requested:null,target_date:null,date_received:null,status:'complete',
     lien_holder:null,lien_type:null,lien_amount:null,lien_negotiated:null
@@ -2293,75 +2311,32 @@ function exportMedicalToWord(caseName){
   h2{font-size:12pt;font-weight:bold;margin-top:18pt;margin-bottom:6pt;border-bottom:1pt solid black;padding-bottom:3pt}
   p{margin:3pt 0}
   table{width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:11pt}
-  th{background:#f0f0f0;border:1pt solid black;padding:5pt 8pt;text-align:left;font-weight:bold}
-  td{border:1pt solid black;padding:5pt 8pt;vertical-align:top}
+  th{background:#0f2044;color:white;border:1pt solid #ccc;padding:5pt 8pt;text-align:left;font-weight:bold}
+  td{border:1pt solid #ccc;padding:5pt 8pt;vertical-align:top}
   .right{text-align:right}
-  .total-row td{font-weight:bold;background:#f8f8f8}
+  .total-row td{font-weight:bold;background:#e8ecf4}
   .center{text-align:center}
 </style></head><body>
 <h1>MEDICAL BILLS AND RECORDS SUMMARY</h1>
-<p class='center'><strong>Client/Case:</strong> ${esc(caseName)}</p>
-<p class='center'><strong>Date Prepared:</strong> ${today}</p>
-<p class='center'><strong>Prepared by:</strong> Altman Nussbaum Shunnarah</p>`;
+<p class='center' style='font-size:13pt;font-weight:bold'>${esc(caseName)}</p>`;
 
-  // Bills table
+  // Bills table only
   if(data.bills.length>0){
-    html+=`<h2>Medical Bills</h2>
-<table>
-<tr><th>Provider</th><th>Dates of Treatment</th><th class='right'>Amount Billed</th><th class='right'>Amount Adjusted</th><th class='right'>Balance</th></tr>`;
+    html+=`<table>
+<tr><th>Provider / Facility</th><th>Dates of Treatment</th><th class='right'>Amount Billed</th></tr>`;
     data.bills.forEach(b=>{
-      const bal=(parseFloat(b.amount_billed)||0)-(parseFloat(b.amount_adjusted)||0);
       html+=`<tr>
         <td>${esc(b.provider)}</td>
         <td>${esc(b.dates_of_treatment||'—')}</td>
         <td class='right'>${fmtMoney(b.amount_billed)}</td>
-        <td class='right'>${fmtMoney(b.amount_adjusted)}</td>
-        <td class='right'>${fmtMoney(bal)}</td>
       </tr>`;
     });
     html+=`<tr class='total-row'>
-      <td colspan='2'><strong>TOTALS</strong></td>
+      <td colspan='2'><strong>TOTAL MEDICAL BILLS</strong></td>
       <td class='right'><strong>${fmtMoney(totalBilled)}</strong></td>
-      <td class='right'><strong>${fmtMoney(totalAdjusted)}</strong></td>
-      <td class='right'><strong>${fmtMoney(totalBalance)}</strong></td>
     </tr></table>`;
-  }
-
-  // Liens table
-  if(data.liens.length>0){
-    html+=`<h2>Liens</h2>
-<table>
-<tr><th>Lienholder</th><th>Type</th><th class='right'>Claimed Amount</th><th class='right'>Negotiated Amount</th><th>Status</th></tr>`;
-    data.liens.forEach(l=>{
-      html+=`<tr>
-        <td>${esc(l.lien_holder||l.provider)}</td>
-        <td>${esc(l.lien_type||'—')}</td>
-        <td class='right'>${fmtMoney(l.lien_amount)}</td>
-        <td class='right'>${fmtMoney(l.lien_negotiated)}</td>
-        <td>${esc(l.status||'—')}</td>
-      </tr>`;
-    });
-    html+=`<tr class='total-row'><td colspan='2'><strong>TOTAL LIENS</strong></td>
-      <td class='right'><strong>${fmtMoney(totalLiens)}</strong></td>
-      <td colspan='2'></td>
-    </tr></table>`;
-  }
-
-  // Records table
-  if(data.records.length>0){
-    html+=`<h2>Medical Records Requests</h2>
-<table>
-<tr><th>Provider</th><th>Date Requested</th><th>Date Received</th><th>Status</th><th>Notes</th></tr>`;
-    data.records.forEach(r=>{
-      html+=`<tr>
-        <td>${esc(r.provider)}</td>
-        <td>${r.date_requested||'—'}</td>
-        <td>${r.date_received||'—'}</td>
-        <td>${esc(r.status||'—')}</td>
-        <td>${esc(r.notes||'—')}</td>
-      </tr>`;
-    });
-    html+=`</table>`;
+  } else {
+    html+=`<p><em>No medical bills entered.</em></p>`;
   }
 
   html+=`</body></html>`;
@@ -2448,7 +2423,6 @@ async function renderMedicalSection(caseName){
         ${b.dates_of_treatment?`<div class="med-meta"><span>Treatment: ${esc(b.dates_of_treatment)}</span></div>`:''}
         <div class="med-meta">
           <span>Billed: ${fmtMoney(b.amount_billed)}</span>
-          <span>Adjusted: ${fmtMoney(b.amount_adjusted)}</span>
         </div>
         ${b.notes?`<div style="font-size:11px;color:var(--gray);font-style:italic">${esc(b.notes)}</div>`:''}
         <div class="med-actions">
@@ -2458,7 +2432,7 @@ async function renderMedicalSection(caseName){
       </div>`;
     });
     html+=`<div style="font-size:12px;font-weight:700;color:var(--navy);padding:8px 0;text-align:right">
-      Total Billed: ${fmtMoney(totalBilled)} &nbsp;|&nbsp; Total Adjusted: ${fmtMoney(totalAdjusted)} &nbsp;|&nbsp; Balance: ${fmtMoney(totalBilled-totalAdjusted)}
+      Total Medical Bills: ${fmtMoney(totalBilled)}
     </div>`;
   }
   html+='</div>';
@@ -2496,8 +2470,8 @@ async function renderMedicalSection(caseName){
   html+='</div>';
 
   // Export button
-  if(data.bills.length>0||data.liens.length>0||data.records.length>0){
-    html+=`<button class="btn-import-all" style="background:#166534;margin-top:8px" onclick="exportMedicalToWord('${esc(caseName)}')">&#x1F4D1; Export Medical Summary to Word</button>`;
+  if(data.bills.length>0){
+    html+=`<button class="btn-import-all" style="background:#166534;margin-top:8px" onclick="exportMedicalToWord('${esc(caseName)}')">&#x1F4D1; Export Medical Bills to Word</button>`;
   }
 
   el.innerHTML=html;
@@ -3207,15 +3181,9 @@ function confirmAmendedComplaint(){
         <label class="form-label">Dates of Treatment</label>
         <input class="form-input" type="text" id="med-bill-dates" placeholder="e.g. 3/15/2024 - 3/22/2024">
       </div>
-      <div class="form-row">
-        <div class="form-group">
+      <div class="form-group">
           <label class="form-label">Amount Billed ($)</label>
           <input class="form-input" type="number" id="med-bill-billed" placeholder="0.00" step="0.01">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Amount Adjusted ($)</label>
-          <input class="form-input" type="number" id="med-bill-adjusted" placeholder="0.00" step="0.01">
-        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Notes</label>
