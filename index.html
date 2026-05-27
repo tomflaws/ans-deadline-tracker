@@ -1351,13 +1351,14 @@ async function loadAllMedical(){
   try{
     const rows=await sbGet('medical','select=*');
     if(!rows||!rows.length) return;
-    // Group by case_name
+    // Reset and rebuild from scratch to avoid duplicates
+    const fresh={};
     rows.forEach(r=>{
-      if(!medicalData[r.case_name]) medicalData[r.case_name]={records:[],bills:[],liens:[]};
+      if(!fresh[r.case_name]) fresh[r.case_name]={records:[],bills:[],liens:[]};
       const cat=r.category+'s';
-      if(medicalData[r.case_name][cat]) medicalData[r.case_name][cat].push(r);
+      if(fresh[r.case_name][cat]) fresh[r.case_name][cat].push(r);
     });
-    // Always re-render cases after loading so badges appear
+    medicalData=fresh;
     renderCases();
   }catch(e){console.error('loadAllMedical error:',e);}
 }
