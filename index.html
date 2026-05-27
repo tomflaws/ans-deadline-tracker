@@ -685,7 +685,7 @@ function switchTab(t){
     document.getElementById('tab-'+p).classList.toggle('active',p===t);
   });
   populateDropdowns();
-  if(t==='cases'){renderCases();setTimeout(()=>loadAllMedical(),100);}
+  if(t==='cases'){loadAllMedical().then(()=>renderCases());}
   else if(t==='deadlines')renderView();
   if(t==='motion'){
     const mc=document.getElementById('motion-case');
@@ -1333,7 +1333,8 @@ async function loadFromSupabase(){
     }
     if(sbStatus){sbStatus.textContent='\u25CF Live';sbStatus.style.color='#4ade80';}
     // Preload medical data for all cases so overdue badges show in Case Manager
-    loadAllMedical().then(()=>renderCases());
+    await loadAllMedical();
+    renderCases();
   }catch(e){
     console.error('Supabase load failed:',e);
     const sbStatus=document.getElementById('sync-status');
