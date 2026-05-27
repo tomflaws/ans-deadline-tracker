@@ -2381,13 +2381,14 @@ function exportMedicalToWord(caseName){
   let html=`<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
 <head><meta charset='utf-8'><title>Medical Summary - ${esc(caseName)}</title>
 <style>
-  body{font-family:'Times New Roman',serif;font-size:12pt;margin:1in}
+  @page{size:8.5in 11in;margin:1in}
+  body{font-family:'Times New Roman',serif;font-size:12pt;margin:1in;width:6.5in}
   h1{font-size:14pt;text-align:center;font-weight:bold;margin-bottom:6pt}
-  h2{font-size:12pt;font-weight:bold;margin-top:18pt;margin-bottom:6pt;border-bottom:1pt solid black;padding-bottom:3pt}
+  h2{font-size:12pt;font-weight:bold;margin-top:18pt;margin-bottom:6pt;border-bottom:1pt solid #0f2044;padding-bottom:3pt;color:#0f2044}
   p{margin:3pt 0}
-  table{width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:11pt}
-  th{background:#0f2044;color:white;border:1pt solid #ccc;padding:5pt 8pt;text-align:left;font-weight:bold}
-  td{border:1pt solid #ccc;padding:5pt 8pt;vertical-align:top}
+  table{width:6.5in;border-collapse:collapse;margin-bottom:12pt;font-size:11pt;table-layout:fixed}
+  th{background:#0f2044;color:white;border:1pt solid #ccc;padding:5pt 8pt;text-align:left;font-weight:bold;word-wrap:break-word}
+  td{border:1pt solid #ccc;padding:5pt 8pt;vertical-align:top;word-wrap:break-word}
   .right{text-align:right}
   .total-row td{font-weight:bold;background:#e8ecf4}
   .center{text-align:center}
