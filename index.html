@@ -1333,11 +1333,13 @@ async function loadFromSupabase(){
     }
     if(sbStatus){sbStatus.textContent='\u25CF Live';sbStatus.style.color='#4ade80';}
     // Preload medical data for all cases so overdue badges show in Case Manager
-    loadAllMedical();
+    loadAllMedical().then(()=>renderCases());
   }catch(e){
     console.error('Supabase load failed:',e);
     const sbStatus=document.getElementById('sync-status');
     if(sbStatus){sbStatus.textContent='\u25CF Offline';sbStatus.style.color='#f87171';}
+    // Try medical even if main load failed
+    loadAllMedical();
   }
 }
 
@@ -1351,10 +1353,9 @@ async function loadAllMedical(){
       const cat=r.category+'s';
       if(medicalData[r.case_name][cat]) medicalData[r.case_name][cat].push(r);
     });
-    // Re-render cases to show badges
-    if(document.getElementById('case-content')&&document.getElementById('pane-cases')&&!document.getElementById('pane-cases').classList.contains('hidden')){
-      renderCases();
-    }
+    // Always re-render cases after loading so badges appear
+    const caseContent=document.getElementById('case-content');
+    if(caseContent) renderCases();
   }catch(e){console.error('loadAllMedical error:',e);}
 }
 
